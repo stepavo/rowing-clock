@@ -589,6 +589,14 @@ let iClipboard      = null;
 let iDragSrcIdx     = null;
 let iPlanCustomized = false;
 
+// Touch-drag state (iOS)
+let iTouchDragIdx    = null;
+let iTouchDragEl     = null;
+let iTouchDragGhost  = null;
+let iTouchDragOffX   = 0;
+let iTouchDragOffY   = 0;
+let iTouchDragTarget = null;
+
 // ── Phase construction ─────────────────────────────────────────
 function buildPhases() {
   const count   = getVal('i-count');
@@ -649,6 +657,50 @@ function makePasteZone(insertIdx) {
   return z;
 }
 
+// ── Touch drag handlers (iOS / iPad) ──────────────────────────
+function onTouchMove(e) {
+  if (!iTouchDragGhost) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  iTouchDragGhost.style.left = (t.clientX - iTouchDragOffX) + 'px';
+  iTouchDragGhost.style.top  = (t.clientY - iTouchDragOffY) + 'px';
+
+  // Find drop target — temporarily hide ghost so elementFromPoint works
+  iTouchDragGhost.style.visibility = 'hidden';
+  const el = document.elementFromPoint(t.clientX, t.clientY);
+  iTouchDragGhost.style.visibility = '';
+
+  document.querySelectorAll('.drag-over-top').forEach(r => r.classList.remove('drag-over-top'));
+  iTouchDragTarget = null;
+  const targetRow = el && el.closest('.interval-row.editable');
+  if (targetRow && targetRow !== iTouchDragEl) {
+    const tIdx = parseInt(targetRow.dataset.idx, 10);
+    if (!isNaN(tIdx) && tIdx !== iTouchDragIdx) {
+      targetRow.classList.add('drag-over-top');
+      iTouchDragTarget = tIdx;
+    }
+  }
+}
+
+function onTouchEnd() {
+  document.removeEventListener('touchmove', onTouchMove);
+  document.removeEventListener('touchend',  onTouchEnd);
+
+  if (iTouchDragGhost) { iTouchDragGhost.remove(); iTouchDragGhost = null; }
+  if (iTouchDragEl)    { iTouchDragEl.style.opacity = ''; iTouchDragEl = null; }
+  document.querySelectorAll('.drag-over-top').forEach(r => r.classList.remove('drag-over-top'));
+
+  const from = iTouchDragIdx, to = iTouchDragTarget;
+  iTouchDragIdx = null; iTouchDragTarget = null;
+
+  if (from !== null && to !== null && from !== to) {
+    const [moved] = iPhases.splice(from, 1);
+    iPhases.splice(to > from ? to - 1 : to, 0, moved);
+    iPlanCustomized = true;
+    buildList();
+  }
+}
+
 function makeEditableRow(p, idx) {
   const rowType = p.type === 'p100' ? 'work' : p.type === 'warmup' ? 'warmup' : 'rest';
   const row = document.createElement('div');
@@ -689,6 +741,33 @@ function makeEditableRow(p, idx) {
   handle.className = 'drag-handle';
   handle.textContent = '\u283f';
   handle.title = 'Drag to reorder';
+
+  // Touch drag (iOS/iPad)
+  handle.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    const rect = row.getBoundingClientRect();
+    iTouchDragIdx  = idx;
+    iTouchDragEl   = row;
+    iTouchDragOffX = t.clientX - rect.left;
+    iTouchDragOffY = t.clientY - rect.top;
+
+    const ghost = row.cloneNode(true);
+    ghost.style.cssText =
+      'position:fixed;pointer-events:none;opacity:0.9;' +
+      'background:var(--panel);border:1px solid var(--accent2);border-radius:8px;' +
+      'z-index:9999;width:' + rect.width + 'px;' +
+      'box-shadow:0 8px 28px rgba(0,0,0,0.7);' +
+      'display:flex;align-items:center;gap:6px;padding:5px 8px;font-size:0.88rem;' +
+      'left:' + (t.clientX - iTouchDragOffX) + 'px;' +
+      'top:'  + (t.clientY - iTouchDragOffY) + 'px;';
+    document.body.appendChild(ghost);
+    iTouchDragGhost = ghost;
+    row.style.opacity = '0.3';
+
+    document.addEventListener('touchmove', onTouchMove, {passive: false});
+    document.addEventListener('touchend',  onTouchEnd);
+  }, {passive: false});
 
   // Type pill — click to toggle 75%/100%
   const pill = document.createElement('span');
