@@ -350,13 +350,25 @@
   .paste-label { font-size: 0.62rem; letter-spacing: 0.12em; color: var(--accent2); opacity: 0.55; white-space: nowrap; transition: opacity 0.15s; }
   .add-phase-row { display: none; justify-content: center; gap: 8px; padding: 10px 0 2px; }
   .add-phase-row.visible { display: flex; }
-  .add-pill-btn { padding: 4px 14px; border-radius: 20px; border: 1px dashed; background: transparent; cursor: pointer; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; transition: all 0.15s; }
+  .add-pill-btn { padding: 4px 14px; border-radius: 20px; border: 1px dashed; background: transparent; cursor: pointer; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; transition: all 0.15px; }
   .add-pill-75  { border-color: var(--rest);  color: var(--rest);  }
   .add-pill-75:hover  { background: rgba(249,115,22,0.15); }
   .add-pill-100 { border-color: var(--work);  color: var(--work);  }
   .add-pill-100:hover { background: rgba(34,197,94,0.15); }
   .time-edit-input { width: 50px; background: var(--bg); border: 1px solid var(--accent2); border-radius: 5px; color: var(--text); font-size: 0.85rem; font-weight: 700; text-align: center; padding: 1px 3px; outline: none; flex-shrink: 0; }
   .pill.clickable:hover { filter: brightness(1.25); cursor: pointer; }
+
+  /* Wake lock indicator */
+  .wakelock-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    margin-left: 6px;
+    vertical-align: middle;
+    transition: background 0.3s;
+  }
+  .wakelock-dot.active { background: var(--work); box-shadow: 0 0 6px var(--work); }
 
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -373,6 +385,7 @@
     <circle cx="12" cy="12" r="10"/>
   </svg>
   Rowing Workout Clock
+  <span class="wakelock-dot" id="wakelock-dot" title="Screen always-on status"></span>
 </h1>
 
 <div class="tabs">
@@ -1130,7 +1143,6 @@ function cRender() {
   setRing('c-ring', frac);
   document.getElementById('c-progress').style.width = (frac * 100) + '%';
   const elapsed = cTotal - cRemaining;
-  const m = Math.floor(elapsed/60), s = elapsed%60;
   document.getElementById('c-sub-label').textContent = `Elapsed: ${fmt(elapsed)}`;
 }
 
@@ -1151,6 +1163,37 @@ function countdownReset() {
   document.getElementById('c-done-banner').classList.remove('visible');
   setRing('c-ring', 1);
 }
+
+// ─────────────────────────────────────────────────────────────────
+//  Wake Lock — keep screen on during workouts
+// ─────────────────────────────────────────────────────────────────
+let wakeLock = null;
+const wlDot  = document.getElementById('wakelock-dot');
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wlDot.classList.add('active');
+    wakeLock.addEventListener('release', () => {
+      wakeLock = null;
+      wlDot.classList.remove('active');
+    });
+  } catch(e) {
+    wlDot.classList.remove('active');
+  }
+}
+
+// Re-acquire after tab becomes visible again (iOS releases on hide)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') requestWakeLock();
+});
+
+// Acquire on first user interaction (required by some browsers)
+document.addEventListener('click', () => { if (!wakeLock) requestWakeLock(); }, { once: false });
+
+// Try immediately (works in most browsers when page is already focused)
+requestWakeLock();
 
 // ─────────────────────────────────────────────────────────────────
 //  Init
